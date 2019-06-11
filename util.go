@@ -15,7 +15,6 @@ const (
 	transLog          = "translog"  // transLog文件的名称
 	thresholdSize     = 1024 * 1024 // memTable转化为SSTable的大小阈值
 	segmentFileSuffix = ".seg"      // 数据文件的后缀名
-	lockFileName      = "lsm.lock"
 )
 
 // 生成新的段文件名
