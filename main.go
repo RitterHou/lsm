@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"errors"
 	"github.com/ryszard/goskiplist/skiplist"
 	"io/ioutil"
 	"log"
@@ -21,23 +21,53 @@ func (l *Lsm) Set(key string, value string) {
 	l.memTable.Set(key, value)
 	if l.memTable.Len()%100 == 0 {
 		memTableSize := l.getMemTableSize()
-		fmt.Println(memTableSize / 1024.0 / 1024.0)
 		if memTableSize > thresholdSize {
-			var err error
-			err = l.createSortedStringTable()
-			if err != nil {
-				log.Fatal(err)
-			}
-			// 重置memTable
-			l.memTable = skiplist.NewStringMap()
-			err = l.resetTransLogFile()
-			if err != nil {
-				log.Fatal(err)
-			}
+			l.Sync()
 		}
 	}
 }
 
+// 把当前memTable中的内容全部同步到SSTable中去
+func (l *Lsm) Sync() {
+	var err error
+	err = l.createSortedStringTable()
+	if err != nil {
+		log.Fatal(err)
+	}
+	// 重置memTable
+	l.memTable = skiplist.NewStringMap()
+	err = l.resetTransLogFile()
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+// 关闭LSM，释放占用的资源
+func (l *Lsm) Close() {
+	l.Sync() // 关闭前同步数据
+
+	// 获取日志文件的绝对路径
+	transLogFilePath := GetFilePath(l.transLogFile)
+	var err error
+	// 关闭日志文件
+	err = l.transLogFile.Close()
+	if err != nil {
+		log.Fatal(err)
+	}
+	// 删除日志文件
+	err = os.Remove(transLogFilePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// 删除锁文件
+	err = os.Remove(path.Join(l.path, lockFileName))
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+// 获取memTable所占用的空间大小
 func (l *Lsm) getMemTableSize() uint64 {
 	var memTableSize uint64 // 内存中占用的空间
 	iterator := l.memTable.Iterator()
@@ -58,7 +88,7 @@ func (l *Lsm) createSortedStringTable() error {
 		buf = append(buf, addBufHead([]byte(iter.Value().(string)))...)
 	}
 
-	err := ioutil.WriteFile(path.Join(l.path, "1.seg"), buf, 0666)
+	err := ioutil.WriteFile(path.Join(l.path, generateSegmentFileName(l.path)), buf, 0666)
 	if err != nil {
 		return err
 	}
@@ -107,13 +137,27 @@ func (l *Lsm) appendTransLog(key string, value string) {
 	}
 }
 
-func NewLsm(director string) *Lsm {
+func NewLsm(director string) (*Lsm, error) {
 	if director == "" {
 		dir, err := os.Getwd()
 		if err != nil {
 			log.Fatal(err)
 		}
 		director = dir
+	}
+
+	lockFilePath := path.Join(director, lockFileName)
+	if _, err := os.Stat(lockFilePath); !os.IsNotExist(err) {
+		return nil, errors.New("Director " + director + " has been used for another LSM Tree")
+	}
+
+	lockFile, err := os.Create(lockFilePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = lockFile.Close()
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	transLogFile, err := os.Create(path.Join(director, transLog))
@@ -124,5 +168,5 @@ func NewLsm(director string) *Lsm {
 		path:         director,
 		memTable:     skiplist.NewStringMap(),
 		transLogFile: transLogFile,
-	}
+	}, nil
 }

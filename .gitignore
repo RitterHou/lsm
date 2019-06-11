@@ -1,3 +1,4 @@
 /.idea
 translog
 *.seg
+lsm.lock
