@@ -156,13 +156,42 @@ func NewLsm(director string) (*Lsm, error) {
 		log.Fatal(err)
 	}
 
-	transLogFile, err := os.Create(path.Join(director, transLog))
+	lsm := &Lsm{
+		path:     director,
+		memTable: skiplist.NewStringMap(),
+	}
+
+	transLogFilePath := path.Join(director, transLog)
+	// 如果transLog文件存在则需要先从日志文件中恢复数据
+	if _, err := os.Stat(transLogFilePath); !os.IsNotExist(err) {
+		var err error
+		logData, err := ioutil.ReadFile(transLogFilePath)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if len(logData) > 0 {
+			for len(logData) > 0 {
+				key, value, length := decodeKeyAndValue(logData)
+				lsm.memTable.Set(key, value)
+				logData = logData[length:]
+			}
+			// 把恢复的数据写到SSTable中
+			err = lsm.createSortedStringTable()
+			if err != nil {
+				log.Fatal(err)
+			}
+			// 日志数据恢复完毕重置memTable
+			lsm.memTable = skiplist.NewStringMap()
+		}
+		err = os.Remove(transLogFilePath)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+	transLogFile, err := os.Create(transLogFilePath)
 	if err != nil {
 		log.Fatal(err)
 	}
-	return &Lsm{
-		path:         director,
-		memTable:     skiplist.NewStringMap(),
-		transLogFile: transLogFile,
-	}, nil
+	lsm.transLogFile = transLogFile
+	return lsm, nil
 }
