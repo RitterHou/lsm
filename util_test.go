@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestParseBuf(t *testing.T) {
 	s := [...]string{
@@ -14,5 +17,26 @@ func TestParseBuf(t *testing.T) {
 		}
 		t.Log(string(s1))
 		t.Log(n)
+	}
+
+	buf := encodeKeyAndValue("name", s[0])
+	buf = append(buf, encodeKeyAndValue("bobby", s[1])...)
+
+	key, value, offset := decodeKeyAndValue(buf)
+	fmt.Println(key, value)
+	buf = buf[offset:]
+	if value != s[0] {
+		t.Fatal("解析错误")
+	}
+
+	key, value, offset = decodeKeyAndValue(buf)
+	fmt.Println(key, value)
+	if value != s[1] {
+		t.Fatal("解析错误")
+	}
+
+	buf = buf[offset:]
+	if len(buf) != 0 {
+		t.Fatal("解析错误")
 	}
 }

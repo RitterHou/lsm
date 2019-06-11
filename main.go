@@ -84,8 +84,7 @@ func (l *Lsm) createSortedStringTable() error {
 	buf := make([]byte, 0)
 	iter := l.memTable.Iterator()
 	for iter.Next() {
-		buf = append(buf, addBufHead([]byte(iter.Key().(string)))...)
-		buf = append(buf, addBufHead([]byte(iter.Value().(string)))...)
+		buf = append(buf, encodeKeyAndValue(iter.Key().(string), iter.Value().(string))...)
 	}
 
 	err := ioutil.WriteFile(path.Join(l.path, generateSegmentFileName(l.path)), buf, 0666)
@@ -123,11 +122,8 @@ func (l *Lsm) Get(key string) (string, bool) {
 
 // 每一条记录都需要写到transLog保证数据不会因为内存断电而丢失
 func (l *Lsm) appendTransLog(key string, value string) {
-	buf := addBufHead([]byte(key))
-	buf = append(buf, addBufHead([]byte(value))...)
-
 	var err error
-	_, err = l.transLogFile.Write(buf)
+	_, err = l.transLogFile.Write(encodeKeyAndValue(key, value))
 	if err != nil {
 		log.Fatal(err)
 	}

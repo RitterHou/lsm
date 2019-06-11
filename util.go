@@ -67,6 +67,19 @@ func addBufHead(buf []byte) []byte {
 	return body
 }
 
+func encodeKeyAndValue(key, value string) []byte {
+	buf := addBufHead([]byte(key))
+	buf = append(buf, addBufHead([]byte(value))...)
+	return buf
+}
+
+func decodeKeyAndValue(buf []byte) (string, string, uint32) {
+	keyBuf, keyOffset := parseBuf(buf)
+	buf = buf[keyOffset:]
+	valueBuf, valOffset := parseBuf(buf)
+	return string(keyBuf), string(valueBuf), keyOffset + valOffset
+}
+
 // 从一段字节数组中解析出body
 func parseBuf(buf []byte) ([]byte, uint32) {
 	offset := uint32(1)
