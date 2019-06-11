@@ -1,5 +1,6 @@
 /.idea
 translog
 *.seg
+*.i
 lsm
 /vendor

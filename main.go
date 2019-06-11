@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path"
+	"strings"
 )
 
 type Lsm struct {
@@ -18,7 +19,7 @@ type Lsm struct {
 func (l *Lsm) Set(key string, value string) {
 	l.appendTransLog(key, value) // 写transLog
 	l.memTable.Set(key, value)
-	if l.memTable.Len()%100 == 0 {
+	if l.memTable.Len()%indexOffset == 0 {
 		memTableSize := l.getMemTableSize()
 		if memTableSize > thresholdSize {
 			l.Sync()
@@ -75,12 +76,34 @@ func (l *Lsm) getMemTableSize() uint64 {
 // 创建SSTable
 func (l *Lsm) createSortedStringTable() error {
 	buf := make([]byte, 0)
+	indexBuf := make([]byte, 0)
+	i := uint64(0)
+	indexBuf = append(indexBuf, getNowBuf()...)
+
 	iter := l.memTable.Iterator()
 	for iter.Next() {
-		buf = append(buf, encodeKeyAndValue(iter.Key().(string), iter.Value().(string))...)
+		key := iter.Key().(string)
+		value := iter.Value().(string)
+
+		i += 1
+		if i%indexOffset == 0 {
+			// 把段文件中的稀疏的key的offset信息写到索引中
+			indexOffset := append(addBufHead([]byte(key)), uint32ToBytes(uint32(len(buf)))...)
+			indexBuf = append(indexBuf, indexOffset...)
+		}
+		buf = append(buf, encodeKeyAndValue(key, value)...)
 	}
 
-	err := ioutil.WriteFile(path.Join(l.path, generateSegmentFileName(l.path)), buf, 0666)
+	// 段文件
+	segmentFileName := generateSegmentFileName(l.path)
+	err := ioutil.WriteFile(path.Join(l.path, segmentFileName), buf, 0666)
+	if err != nil {
+		return err
+	}
+
+	// 索引文件
+	indexFileName := strings.Replace(segmentFileName, segmentFileSuffix, indexFileSuffix, -1)
+	err = ioutil.WriteFile(path.Join(l.path, indexFileName), indexBuf, 0666)
 	if err != nil {
 		return err
 	}

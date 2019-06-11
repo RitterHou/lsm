@@ -9,11 +9,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
 	transLog          = "translog"  // transLog文件的名称
 	thresholdSize     = 1024 * 1024 // memTable转化为SSTable的大小阈值
+	indexOffset       = 1000        // 每隔offset创建一个索引
+	indexFileSuffix   = ".i"        // 索引文件的后缀名
 	segmentFileSuffix = ".seg"      // 数据文件的后缀名
 )
 
@@ -50,6 +53,17 @@ func uint32ToBytes(num uint32) []byte {
 	buf := make([]byte, 4)
 	binary.LittleEndian.PutUint32(buf, num)
 	return buf
+}
+
+func uint64ToBytes(num uint64) []byte {
+	buf := make([]byte, 8)
+	binary.LittleEndian.PutUint64(buf, num)
+	return buf
+}
+
+func getNowBuf() []byte {
+	now := time.Now().UnixNano()
+	return uint64ToBytes(uint64(now))
 }
 
 // 给一段字节数组加上头部信息
