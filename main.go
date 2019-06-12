@@ -7,13 +7,15 @@ import (
 	"os"
 	"path"
 	"strings"
+	"time"
 )
 
 type Lsm struct {
 	path     string
 	memTable *skiplist.SkipList
 
-	transLogFile *os.File
+	transLogFile       *os.File
+	transLogStrictSync bool // transLog是否需要严格同步
 }
 
 func (l *Lsm) Set(key string, value string) {
@@ -22,13 +24,13 @@ func (l *Lsm) Set(key string, value string) {
 	if l.memTable.Len()%memTableCheckInterval == 0 {
 		memTableSize := l.getMemTableSize()
 		if memTableSize > thresholdSize {
-			l.Sync()
+			l.SyncMemTable()
 		}
 	}
 }
 
 // 把当前memTable中的内容全部同步到SSTable中去
-func (l *Lsm) Sync() {
+func (l *Lsm) SyncMemTable() {
 	var err error
 	err = l.createSortedStringTable()
 	if err != nil {
@@ -44,7 +46,7 @@ func (l *Lsm) Sync() {
 
 // 关闭LSM，释放占用的资源
 func (l *Lsm) Close() {
-	l.Sync() // 关闭前同步数据
+	l.SyncMemTable() // 关闭前同步数据
 
 	// 获取日志文件的绝对路径
 	transLogFilePath := GetFilePath(l.transLogFile)
@@ -121,9 +123,11 @@ func (l *Lsm) resetTransLogFile() error {
 	if err != nil {
 		return err
 	}
-	err = l.transLogFile.Sync()
-	if err != nil {
-		return err
+	if l.transLogStrictSync {
+		err = l.transLogFile.Sync()
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -143,13 +147,16 @@ func (l *Lsm) appendTransLog(key string, value string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = l.transLogFile.Sync()
-	if err != nil {
-		log.Fatal(err)
+	// 如果开启了严格同步，则每一条日志都需要同步到磁盘
+	if l.transLogStrictSync {
+		err = l.transLogFile.Sync()
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 }
 
-// 恢复transLog中的数据
+// 恢复transLog中的数据，并把其数据写到SSTable中
 func restoreTransLogData(lsm *Lsm, transLogFilePath string) {
 	logData, err := ioutil.ReadFile(transLogFilePath)
 	if err != nil {
@@ -171,8 +178,8 @@ func restoreTransLogData(lsm *Lsm, transLogFilePath string) {
 	}
 }
 
-// 新建一个LSM
-func NewLsm(director string) (*Lsm, error) {
+// 新建一个LSM，数据文件的目录地址，是否开启严格的事务日志同步模式
+func NewLsm(director string, transLogStrictSync bool) (*Lsm, error) {
 	if director == "" {
 		dir, err := os.Getwd()
 		if err != nil {
@@ -182,8 +189,9 @@ func NewLsm(director string) (*Lsm, error) {
 	}
 
 	lsm := &Lsm{
-		path:     director,
-		memTable: skiplist.NewStringMap(),
+		path:               director,
+		memTable:           skiplist.NewStringMap(),
+		transLogStrictSync: transLogStrictSync,
 	}
 	transLogFilePath := path.Join(director, transLog)
 	// 如果transLog文件存在则需要先从日志文件中恢复数据
@@ -199,5 +207,24 @@ func NewLsm(director string) (*Lsm, error) {
 		log.Fatal(err)
 	}
 	lsm.transLogFile = transLogFile
+
+	// 如果没有开启严格的同步模式，则需要异步的transLog数据同步
+	if !lsm.transLogStrictSync {
+		go func() {
+			ticker := time.NewTicker(time.Second * transLogAsyncInterval)
+			for range ticker.C {
+				// 每隔指定时间把日志数据落盘
+				err = lsm.transLogFile.Sync()
+				if err != nil {
+					// 在LSM被关闭时，日志文件会被关闭，此时退出异步数据落盘协程
+					if err.Error() == "sync "+lsm.transLogFile.Name()+": file already closed" {
+						log.Println("Async transLog synchronize goroutine closed.")
+						return
+					}
+					log.Fatal(err)
+				}
+			}
+		}()
+	}
 	return lsm, nil
 }

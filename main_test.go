@@ -29,7 +29,7 @@ func randomInt(from, to int) int {
 func TestLsm(t *testing.T) {
 	start := time.Now().Unix()
 
-	lsm, err := NewLsm("./")
+	lsm, err := NewLsm("./", false)
 	if err != nil {
 		log.Fatal(err)
 	}

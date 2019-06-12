@@ -18,7 +18,8 @@ const (
 	indexOffset           = 1000            // 每隔offset个元素创建一个索引
 	indexFileSuffix       = ".i"            // 索引文件的后缀名
 	segmentFileSuffix     = ".seg"          // 数据文件的后缀名
-	transLog              = "translog"      // transLog文件的名称
+	transLog              = "translog"      // transLog文件的名称，即事务日志(transaction log)
+	transLogAsyncInterval = 1               // transLog异步的落盘时间间隔（秒）
 )
 
 // 生成新的段文件名
