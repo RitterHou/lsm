@@ -1,8 +1,11 @@
 package main
 
 import (
+	"fmt"
+	"io/ioutil"
 	"log"
 	"math/rand"
+	"strings"
 	"testing"
 	"time"
 )
@@ -24,6 +27,8 @@ func randomInt(from, to int) int {
 }
 
 func TestLsm(t *testing.T) {
+	start := time.Now().Unix()
+
 	lsm, err := NewLsm("./")
 	if err != nil {
 		log.Fatal(err)
@@ -36,10 +41,18 @@ func TestLsm(t *testing.T) {
 	lsm.Set("name", "Json")
 	t.Log(lsm.Get("name"))
 
-	for i := 0; i < 100000; i++ {
-		key := randomString(randomInt(5, 15))
-		value := randomString(randomInt(10, 50))
-		lsm.Set(key, value)
+	data, err := ioutil.ReadFile("./test.txt")
+	if err != nil {
+		log.Fatal(err)
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		tmp := strings.Split(line, ",")
+		if len(tmp) > 1 {
+			lsm.Set(tmp[0], tmp[1])
+		}
 	}
 	lsm.Close()
+
+	fmt.Printf("Cost %d seconds\n", time.Now().Unix()-start)
 }

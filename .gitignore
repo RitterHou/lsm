@@ -4,3 +4,4 @@ translog
 *.i
 lsm
 /vendor
+test.txt
