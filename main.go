@@ -19,7 +19,7 @@ type Lsm struct {
 func (l *Lsm) Set(key string, value string) {
 	l.appendTransLog(key, value) // 写transLog
 	l.memTable.Set(key, value)
-	if l.memTable.Len()%indexOffset == 0 {
+	if l.memTable.Len()%memTableCheckInterval == 0 {
 		memTableSize := l.getMemTableSize()
 		if memTableSize > thresholdSize {
 			l.Sync()

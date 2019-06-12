@@ -13,11 +13,12 @@ import (
 )
 
 const (
-	transLog          = "translog"  // transLog文件的名称
-	thresholdSize     = 1024 * 1024 // memTable转化为SSTable的大小阈值
-	indexOffset       = 1000        // 每隔offset创建一个索引
-	indexFileSuffix   = ".i"        // 索引文件的后缀名
-	segmentFileSuffix = ".seg"      // 数据文件的后缀名
+	thresholdSize         = 1024 * 1024 * 3 // memTable转化为SSTable的大小阈值
+	memTableCheckInterval = 1000 * 3        // 每隔指定的操作次数就检测一次内存表的大小
+	indexOffset           = 1000            // 每隔offset个元素创建一个索引
+	indexFileSuffix       = ".i"            // 索引文件的后缀名
+	segmentFileSuffix     = ".seg"          // 数据文件的后缀名
+	transLog              = "translog"      // transLog文件的名称
 )
 
 // 生成新的段文件名
