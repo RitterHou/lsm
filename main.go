@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/binary"
 	"github.com/ryszard/goskiplist/skiplist"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -9,6 +11,11 @@ import (
 	"strings"
 	"time"
 )
+
+type index struct {
+	key    string
+	offset uint32
+}
 
 type Lsm struct {
 	path     string
@@ -133,11 +140,129 @@ func (l *Lsm) resetTransLogFile() error {
 }
 
 func (l *Lsm) Get(key string) (string, bool) {
-	value, ok := l.memTable.Get(key)
+	memValue, ok := l.memTable.Get(key)
 	if ok {
-		return value.(string), true
+		return memValue.(string), true
 	}
-	return "", false
+	// 如果在memTable中没取到数据则需要去seg文件中进行查询
+	maximumTime := uint64(0) // 当前的最大时间
+	value := ""              // 最大时间对于的值
+	indexFilesPath := getIndexFilesPath(l.path)
+	for _, indexFilePath := range indexFilesPath {
+		segFilePath := strings.Replace(indexFilePath, indexFileSuffix, segmentFileSuffix, -1)
+
+		var err error
+		indexData, err := ioutil.ReadFile(indexFilePath)
+		if err != nil {
+			log.Fatal(err)
+		}
+		thisTime := binary.LittleEndian.Uint64(indexData[:8])
+
+		// 新的数据才有检索的必要
+		if thisTime > maximumTime {
+			maximumTime = thisTime
+
+			indices := getIndexList(indexData)
+			low := uint32(0)
+			high := uint32(0)
+			if len(indices) > 1 { // 0或1个索引是没有意义的
+				for i := 0; i < len(indices)-1; i++ {
+					if indices[i].key == key { // 直接命中索引
+						low = indices[i].offset
+						high = low
+						break
+					}
+					if indices[i].key < key && key < indices[i+1].key {
+						low = indices[i].offset
+						high = indices[i+1].offset
+						break
+					}
+				}
+				// 比索引中的最大key还要大
+				if key >= indices[len(indices)-1].key {
+					low = indices[len(indices)-1].offset
+				}
+			}
+
+			segFile, err := os.Open(segFilePath)
+			if err != nil {
+				log.Fatal(err)
+			}
+			fileInfo, err := segFile.Stat()
+			if err != nil {
+				log.Fatal(err)
+			}
+			size := fileInfo.Size()
+
+			if low == 0 && high == 0 { // 1. 索引失效
+				for {
+					thisKey, thisValue := readKeyAndValue(segFile)
+					if thisKey == key {
+						value = thisValue
+						break
+					}
+
+					// 从当前偏移改变0，还是当前偏移
+					pos, _ := segFile.Seek(0, io.SeekCurrent)
+					if pos >= size {
+						break
+					}
+				}
+			} else if low == high { // 2. 索引命中
+				_, err = segFile.Seek(int64(low), 0)
+				if err != nil {
+					log.Fatal(err)
+				}
+				_, thisValue := readKeyAndValue(segFile)
+				value = thisValue
+
+			} else if low < high { // 3. 索引范围命中
+				_, err = segFile.Seek(int64(low), 0)
+				if err != nil {
+					log.Fatal(err)
+				}
+
+				for {
+					thisKey, thisValue := readKeyAndValue(segFile)
+					if thisKey == key {
+						value = thisValue
+						break
+					}
+
+					// 从当前偏移改变0，还是当前偏移
+					pos, _ := segFile.Seek(0, io.SeekCurrent)
+					if uint32(pos) >= high {
+						break
+					}
+				}
+			} else { // 4. 比最大的key还要大
+				_, err = segFile.Seek(int64(low), 0)
+				if err != nil {
+					log.Fatal(err)
+				}
+
+				for {
+					thisKey, thisValue := readKeyAndValue(segFile)
+					if thisKey == key {
+						value = thisValue
+						break
+					}
+
+					// 从当前偏移改变0，还是当前偏移
+					pos, _ := segFile.Seek(0, io.SeekCurrent)
+					if pos >= size {
+						break
+					}
+				}
+			}
+
+			err = segFile.Close()
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+	}
+	return value, false
 }
 
 // 每一条记录都需要写到transLog保证数据不会因为内存断电而丢失

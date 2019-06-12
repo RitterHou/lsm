@@ -22,6 +22,23 @@ const (
 	transLogAsyncInterval = 1               // transLog异步的落盘时间间隔（秒）
 )
 
+// 获取所有的索引文件的路径
+func getIndexFilesPath(lsmPath string) []string {
+	files, err := ioutil.ReadDir(lsmPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	paths := make([]string, 0)
+	for _, file := range files {
+		name := file.Name()
+		if file.Mode().IsRegular() && strings.HasSuffix(name, indexFileSuffix) {
+			paths = append(paths, path.Join(lsmPath, name))
+		}
+	}
+	return paths
+}
+
 // 生成新的段文件名
 func generateSegmentFileName(path string) string {
 	files, err := ioutil.ReadDir(path)
@@ -49,6 +66,19 @@ func generateSegmentFileName(path string) string {
 		}
 		i += 1
 	}
+}
+
+// 从索引文件中获取索引列表
+func getIndexList(data []byte) []index {
+	data = data[8:]
+	indices := make([]index, 0)
+	for len(data) > 0 {
+		key, offset := parseBuf(data)
+		data = data[offset:]
+		indices = append(indices, index{string(key), binary.LittleEndian.Uint32(data)})
+		data = data[4:]
+	}
+	return indices
 }
 
 func uint32ToBytes(num uint32) []byte {
@@ -109,6 +139,42 @@ func parseBuf(buf []byte) ([]byte, uint32) {
 		body := buf[5 : 5+length]
 		return body, offset
 	}
+}
+
+func readBuf(file *os.File) []byte {
+	headBuf := make([]byte, 1)
+	_, err := file.Read(headBuf)
+	if err != nil {
+		log.Fatal(err)
+	}
+	head := headBuf[0]
+	if head < 0xff {
+		body := make([]byte, head)
+		_, err := file.Read(body)
+		if err != nil {
+			log.Fatal(err)
+		}
+		return body
+	} else {
+		lengthBuf := make([]byte, 4)
+		_, err := file.Read(lengthBuf)
+		if err != nil {
+			log.Fatal(err)
+		}
+		length := binary.LittleEndian.Uint32(lengthBuf)
+		body := make([]byte, length)
+		_, err = file.Read(body)
+		if err != nil {
+			log.Fatal(err)
+		}
+		return body
+	}
+}
+
+func readKeyAndValue(file *os.File) (string, string) {
+	key := readBuf(file)
+	value := readBuf(file)
+	return string(key), string(value)
 }
 
 // 获取指定文件的绝对路径
