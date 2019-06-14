@@ -94,8 +94,11 @@ func TestQuery(t *testing.T) {
 			if value != tmp[1] {
 				t.Fatalf("key: %s, %s != %s", key, value, tmp[1])
 			}
-			t.Logf("%s: %s\n", key, value)
-			fmt.Printf("%4.2f%% %6ds %6d: %d %s: %s\n", float32(i)/float32(len(lines))*100, time.Now().Unix()-start, i, len(lines), key, value)
+			// t.Logf("%s: %s\n", key, value)
+			if i%1000 == 0 {
+				fmt.Printf("%4.2f%% %6ds %6d: %d %s: %s\n", float32(i)/float32(len(lines))*100, time.Now().Unix()-start, i, len(lines), key, value)
+				start = time.Now().Unix()
+			}
 		}
 	}
 
