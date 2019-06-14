@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/binary"
 	"github.com/ryszard/goskiplist/skiplist"
 	"io"
 	"io/ioutil"
@@ -16,7 +15,12 @@ func init() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 }
 
-type index struct {
+type Data struct {
+	value     string
+	timestamp uint64
+}
+
+type Index struct {
 	key    string
 	offset uint32
 }
@@ -30,8 +34,9 @@ type Lsm struct {
 }
 
 func (l *Lsm) Set(key string, value string) {
-	l.appendTransLog(key, value) // 写transLog
-	l.memTable.Set(key, value)
+	data := Data{value: value, timestamp: uint64(time.Now().UnixNano())}
+	l.appendTransLog(key, data) // 写transLog
+	l.memTable.Set(key, data)
 	if l.memTable.Len()%memTableCheckInterval == 0 {
 		memTableSize := l.getMemTableSize()
 		if memTableSize > thresholdSize {
@@ -80,8 +85,8 @@ func (l *Lsm) getMemTableSize() uint64 {
 	iterator := l.memTable.Iterator()
 	for iterator.Next() {
 		key := iterator.Key().(string)
-		value := iterator.Value().(string)
-		memTableSize = memTableSize + uint64(len(key)) + uint64(len(value))
+		data := iterator.Value().(Data)
+		memTableSize = memTableSize + uint64(len(key)) + uint64(len(data.value)) + 8
 	}
 	return memTableSize
 }
@@ -96,12 +101,11 @@ func (l *Lsm) createSortedStringTable() error {
 	buf := make([]byte, 0)
 	indexBuf := make([]byte, 0)
 	i := uint64(0)
-	indexBuf = append(indexBuf, getNowBuf()...)
 
 	iter := l.memTable.Iterator()
 	for iter.Next() {
 		key := iter.Key().(string)
-		value := iter.Value().(string)
+		data := iter.Value().(Data)
 
 		if i%indexOffset == 0 || i+1 == uint64(l.memTable.Len()) {
 			// 把段文件中的稀疏的key的offset信息写到索引中
@@ -109,7 +113,7 @@ func (l *Lsm) createSortedStringTable() error {
 			indexBuf = append(indexBuf, indexOffset...)
 		}
 		i += 1
-		buf = append(buf, encodeKeyAndValue(key, value)...)
+		buf = append(buf, encodeKeyAndData(key, data)...)
 	}
 
 	// 段文件
@@ -151,11 +155,22 @@ func (l *Lsm) resetTransLogFile() error {
 func (l *Lsm) Get(key string) (string, bool) {
 	memValue, ok := l.memTable.Get(key)
 	if ok {
-		return memValue.(string), true
+		return memValue.(Data).value, true
 	}
+
 	// 如果在memTable中没取到数据则需要去seg文件中进行查询
-	maximumTime := uint64(0) // 当前的最大时间
-	value := ""              // 最大时间对于的值
+	valueTimestamp := uint64(0) // 当前值的时间
+	value := ""                 // 最大时间对于的值
+
+	// 根据得到的data来决定是否更新value的值
+	var setValue = func(data Data) {
+		if data.timestamp > valueTimestamp {
+			value = data.value
+			ok = true
+			valueTimestamp = data.timestamp
+		}
+	}
+
 	indexFilesPath := getIndexFilesPath(l.path)
 	for _, indexFilePath := range indexFilesPath {
 		segFilePath := strings.Replace(indexFilePath, indexFileSuffix, segmentFileSuffix, -1)
@@ -165,114 +180,105 @@ func (l *Lsm) Get(key string) (string, bool) {
 		if err != nil {
 			log.Fatal(err)
 		}
-		thisTime := binary.LittleEndian.Uint64(indexData[:8])
 
-		// 新的数据才有检索的必要
-		if thisTime > maximumTime {
-			maximumTime = thisTime
-
-			indices := getIndexList(indexData)
-			length := len(indices)
-			low := uint32(0)
-			high := uint32(0)
-			if length > 1 { // 0或1个索引是没有意义的
-				// 超过范围，无法被找到，跳过该索引文件
-				if key < indices[0].key || key > indices[length-1].key {
-					continue
-				}
-				for i := 0; i < length; i++ {
-					if indices[i].key == key { // 直接命中索引
-						low = indices[i].offset
-						high = low
-						break
-					}
-					if i == length-1 {
-						// 最后一个元素都没有命中，不再需要范围查询了
-						break
-					}
-					if indices[i].key < key && key < indices[i+1].key {
-						low = indices[i].offset
-						high = indices[i+1].offset
-						break
-					}
-				}
+		indices := getIndexList(indexData)
+		length := len(indices)
+		low := uint32(0)
+		high := uint32(0)
+		if length > 1 { // 0或1个索引是没有意义的
+			// 超过范围，无法被找到，跳过该索引文件
+			if key < indices[0].key || key > indices[length-1].key {
+				continue
 			}
-
-			segFile, err := os.Open(segFilePath)
-			if err != nil {
-				log.Fatal(err)
-			}
-			fileInfo, err := segFile.Stat()
-			if err != nil {
-				log.Fatal(err)
-			}
-			size := fileInfo.Size()
-
-			if low == 0 && high == 0 { // 1. 索引失效
-				//start := time.Now().UnixNano()
-				for {
-					thisKey, thisValue := readKeyAndValue(segFile)
-					if thisKey == key {
-						value = thisValue
-						break
-					}
-
-					// 从当前偏移改变0，还是当前偏移
-					pos, _ := segFile.Seek(0, io.SeekCurrent)
-					if pos >= size {
-						break
-					}
+			for i := 0; i < length; i++ {
+				if indices[i].key == key { // 直接命中索引
+					low = indices[i].offset
+					high = low
+					break
 				}
-				// 索引失败的查询时间差不多是其它的1000倍
-				//fmt.Printf("索引失败：%d\n", time.Now().UnixNano()-start)
-			} else if low == high { // 2. 索引命中
-				//start := time.Now().UnixNano()
-				_, err = segFile.Seek(int64(low), 0)
-				if err != nil {
-					log.Fatal(err)
+				if i == length-1 {
+					// 最后一个元素都没有命中，不再需要范围查询了
+					break
 				}
-				_, thisValue := readKeyAndValue(segFile)
-				value = thisValue
-				//fmt.Printf("索引命中：%d\n", time.Now().UnixNano()-start)
-			} else if low < high { // 3. 索引范围命中
-				//start := time.Now().UnixNano()
-				_, err = segFile.Seek(int64(low), 0)
-				if err != nil {
-					log.Fatal(err)
+				if indices[i].key < key && key < indices[i+1].key {
+					low = indices[i].offset
+					high = indices[i+1].offset
+					break
 				}
-
-				for {
-					thisKey, thisValue := readKeyAndValue(segFile)
-					if thisKey == key {
-						value = thisValue
-						break
-					}
-
-					// 从当前偏移改变0，还是当前偏移
-					pos, _ := segFile.Seek(0, io.SeekCurrent)
-					if uint32(pos) >= high {
-						break
-					}
-				}
-				//fmt.Printf("范围索引命中：%d\n", time.Now().UnixNano()-start)
-			}
-
-			err = segFile.Close()
-			if err != nil {
-				log.Fatal(err)
 			}
 		}
+
+		segFile, err := os.Open(segFilePath)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fileInfo, err := segFile.Stat()
+		if err != nil {
+			log.Fatal(err)
+		}
+		size := fileInfo.Size()
+
+		if low == 0 && high == 0 { // 1. 索引失效
+			//start := time.Now().UnixNano()
+			for {
+				thisKey, data := readKeyAndData(segFile)
+				if thisKey == key {
+					setValue(data)
+					break
+				}
+
+				// 从当前偏移改变0，还是当前偏移
+				pos, _ := segFile.Seek(0, io.SeekCurrent)
+				if pos >= size {
+					break
+				}
+			}
+			// 索引失败的查询时间差不多是其它的1000倍
+			//fmt.Printf("索引失败：%d\n", time.Now().UnixNano()-start)
+		} else if low == high { // 2. 索引命中
+			//start := time.Now().UnixNano()
+			_, err = segFile.Seek(int64(low), 0)
+			if err != nil {
+				log.Fatal(err)
+			}
+			_, data := readKeyAndData(segFile)
+			setValue(data)
+			//fmt.Printf("索引命中：%d\n", time.Now().UnixNano()-start)
+		} else if low < high { // 3. 索引范围命中
+			//start := time.Now().UnixNano()
+			_, err = segFile.Seek(int64(low), 0)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			for {
+				thisKey, data := readKeyAndData(segFile)
+				if thisKey == key {
+					setValue(data)
+					break
+				}
+
+				// 从当前偏移改变0，还是当前偏移
+				pos, _ := segFile.Seek(0, io.SeekCurrent)
+				if uint32(pos) >= high {
+					break
+				}
+			}
+			//fmt.Printf("范围索引命中：%d\n", time.Now().UnixNano()-start)
+		}
+
+		err = segFile.Close()
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
-	if value != "" {
-		return value, true
-	}
-	return value, false
+	return value, ok
 }
 
 // 每一条记录都需要写到transLog保证数据不会因为内存断电而丢失
-func (l *Lsm) appendTransLog(key string, value string) {
+func (l *Lsm) appendTransLog(key string, data Data) {
 	var err error
-	_, err = l.transLogFile.Write(encodeKeyAndValue(key, value))
+	_, err = l.transLogFile.Write(encodeKeyAndData(key, data))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -293,8 +299,8 @@ func restoreTransLogData(lsm *Lsm, transLogFilePath string) {
 	}
 	if len(logData) > 0 {
 		for len(logData) > 0 {
-			key, value, length := decodeKeyAndValue(logData)
-			lsm.memTable.Set(key, value)
+			key, data, length := decodeKeyAndData(logData)
+			lsm.memTable.Set(key, data)
 			logData = logData[length:]
 		}
 		// 把恢复的数据写到SSTable中

@@ -82,7 +82,7 @@ func TestQuery(t *testing.T) {
 	i := 0
 	lines := strings.Split(string(data), "\n")
 	start := time.Now().Unix()
-	for _, line := range lines {
+	for _, line := range lines[:3000] {
 		i += 1
 		tmp := strings.Split(line, ",")
 		if len(tmp) > 1 {
