@@ -25,6 +25,46 @@ func randomInt(from, to int) int {
 	return rand.Intn(to-from) + from
 }
 
+func TestEasySave(t *testing.T) {
+	lsm, err := NewLsm("./", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lsm.Set("name", "Mike")
+	lsm.Set("age", "18")
+	t.Log(lsm.Get("name"))
+	t.Log(lsm.Get("hobby"))
+	t.Log(lsm.Get("age"))
+	lsm.Set("name", "Json")
+	t.Log(lsm.Get("name"))
+
+	lsm.Set("name", "约瑟马璐德威廉特纳")
+	t.Log(lsm.Get("name"))
+
+	lsm.Close()
+}
+
+func TestEasyQuery(t *testing.T) {
+	lsm, err := NewLsm("./", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, ok := lsm.Get("name")
+	if ok {
+		t.Log(name)
+	}
+	hobby, ok := lsm.Get("hobby")
+	if ok {
+		t.Log(hobby)
+	}
+	age, ok := lsm.Get("age")
+	if ok {
+		t.Log(age)
+	}
+
+	lsm.Close()
+}
+
 func TestSave(t *testing.T) {
 	start := time.Now().Unix()
 
