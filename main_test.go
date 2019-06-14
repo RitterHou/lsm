@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io/ioutil"
-	"log"
 	"math/rand"
 	"strings"
 	"testing"
@@ -26,12 +25,12 @@ func randomInt(from, to int) int {
 	return rand.Intn(to-from) + from
 }
 
-func TestLsm(t *testing.T) {
+func TestSave(t *testing.T) {
 	start := time.Now().Unix()
 
 	lsm, err := NewLsm("./", false)
 	if err != nil {
-		log.Fatal(err)
+		t.Fatal(err)
 	}
 	lsm.Set("name", "Mike")
 	lsm.Set("age", "18")
@@ -43,7 +42,7 @@ func TestLsm(t *testing.T) {
 
 	data, err := ioutil.ReadFile("./test.txt")
 	if err != nil {
-		log.Fatal(err)
+		t.Fatal(err)
 	}
 	lines := strings.Split(string(data), "\n")
 	for _, line := range lines {
@@ -55,4 +54,50 @@ func TestLsm(t *testing.T) {
 	lsm.Close()
 
 	fmt.Printf("Cost %d seconds\n", time.Now().Unix()-start)
+}
+
+func TestQuery(t *testing.T) {
+	lsm, err := NewLsm("./", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, ok := lsm.Get("name")
+	if ok {
+		t.Log(name)
+	}
+	hobby, ok := lsm.Get("hobby")
+	if ok {
+		t.Log(hobby)
+	}
+	age, ok := lsm.Get("age")
+	if ok {
+		t.Log(age)
+	}
+	t.Log(lsm.Get("g4829571_20212"))
+
+	data, err := ioutil.ReadFile("./test.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := 0
+	lines := strings.Split(string(data), "\n")
+	start := time.Now().Unix()
+	for _, line := range lines {
+		i += 1
+		tmp := strings.Split(line, ",")
+		if len(tmp) > 1 {
+			key := tmp[0]
+			value, ok := lsm.Get(key)
+			if !ok {
+				t.Fatal("Can't find key " + key)
+			}
+			if value != tmp[1] {
+				t.Fatalf("key: %s, %s != %s", key, value, tmp[1])
+			}
+			t.Logf("%s: %s\n", key, value)
+			fmt.Printf("%4.2f%% %6ds %6d: %d %s: %s\n", float32(i)/float32(len(lines))*100, time.Now().Unix()-start, i, len(lines), key, value)
+		}
+	}
+
+	lsm.Close()
 }

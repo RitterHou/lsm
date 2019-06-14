@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"fmt"
 	"github.com/ryszard/goskiplist/skiplist"
 	"io"
 	"io/ioutil"
@@ -11,6 +12,10 @@ import (
 	"strings"
 	"time"
 )
+
+func init() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+}
 
 type index struct {
 	key    string
@@ -84,6 +89,11 @@ func (l *Lsm) getMemTableSize() uint64 {
 
 // 创建SSTable
 func (l *Lsm) createSortedStringTable() error {
+	// 没有数据则无需保存
+	if l.memTable.Len() == 0 {
+		return nil
+	}
+
 	buf := make([]byte, 0)
 	indexBuf := make([]byte, 0)
 	i := uint64(0)
@@ -195,6 +205,7 @@ func (l *Lsm) Get(key string) (string, bool) {
 			size := fileInfo.Size()
 
 			if low == 0 && high == 0 { // 1. 索引失效
+				start := time.Now().UnixNano()
 				for {
 					thisKey, thisValue := readKeyAndValue(segFile)
 					if thisKey == key {
@@ -208,15 +219,19 @@ func (l *Lsm) Get(key string) (string, bool) {
 						break
 					}
 				}
+				// 索引失败的查询时间差不多是其它的1000倍 TODO
+				fmt.Printf("索引失败：%d\n", time.Now().UnixNano()-start)
 			} else if low == high { // 2. 索引命中
+				start := time.Now().UnixNano()
 				_, err = segFile.Seek(int64(low), 0)
 				if err != nil {
 					log.Fatal(err)
 				}
 				_, thisValue := readKeyAndValue(segFile)
 				value = thisValue
-
+				fmt.Printf("索引命中：%d\n", time.Now().UnixNano()-start)
 			} else if low < high { // 3. 索引范围命中
+				start := time.Now().UnixNano()
 				_, err = segFile.Seek(int64(low), 0)
 				if err != nil {
 					log.Fatal(err)
@@ -235,7 +250,9 @@ func (l *Lsm) Get(key string) (string, bool) {
 						break
 					}
 				}
+				fmt.Printf("范围索引命中：%d\n", time.Now().UnixNano()-start)
 			} else { // 4. 比最大的key还要大
+				start := time.Now().UnixNano()
 				_, err = segFile.Seek(int64(low), 0)
 				if err != nil {
 					log.Fatal(err)
@@ -254,6 +271,7 @@ func (l *Lsm) Get(key string) (string, bool) {
 						break
 					}
 				}
+				fmt.Printf("从最后取：%d\n", time.Now().UnixNano()-start)
 			}
 
 			err = segFile.Close()
@@ -261,6 +279,9 @@ func (l *Lsm) Get(key string) (string, bool) {
 				log.Fatal(err)
 			}
 		}
+	}
+	if value != "" {
+		return value, true
 	}
 	return value, false
 }
@@ -301,6 +322,11 @@ func restoreTransLogData(lsm *Lsm, transLogFilePath string) {
 		// 日志数据恢复完毕重置memTable
 		lsm.memTable = skiplist.NewStringMap()
 	}
+}
+
+// 后台对数据文件进行合并
+func backgroundMerge(director string) {
+
 }
 
 // 新建一个LSM，数据文件的目录地址，是否开启严格的事务日志同步模式
@@ -351,5 +377,7 @@ func NewLsm(director string, transLogStrictSync bool) (*Lsm, error) {
 			}
 		}()
 	}
+
+	go backgroundMerge(lsm.path)
 	return lsm, nil
 }
