@@ -15,11 +15,29 @@ const (
 	thresholdSize         = 1024 * 1024 * 3 // memTable转化为SSTable的大小阈值
 	memTableCheckInterval = 1000 * 3        // 每隔指定的操作次数就检测一次内存表的大小
 	indexOffset           = 1000            // 每隔offset个元素创建一个索引
-	indexFileSuffix       = ".i"            // 索引文件的后缀名
-	segmentFileSuffix     = ".seg"          // 数据文件的后缀名
+	indexFileSuffix       = ".i"            // 索引文件的后缀名(index)
+	segmentFileSuffix     = ".seg"          // 数据文件的后缀名(segment)
+	unavailableFileSuffix = ".ua"           // 数据不可用标签文件的后缀名(unavailable)
+	mergeCheckInterval    = 5               // 文件合并行为的检测时间间隔（秒）
+	maxSegmentFileSize    = 5               // 当段文件数量超过这个限制的时候就会触发merge
 	transLog              = "translog"      // transLog文件的名称，即事务日志(transaction log)
 	transLogAsyncInterval = 1               // transLog异步的落盘时间间隔（秒）
 )
+
+// 在指定目录中是否存在特定的后缀名文件
+func isFileSuffixExist(director string, suffix string) bool {
+	files, err := ioutil.ReadDir(director)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, file := range files {
+		if file.Mode().IsRegular() && strings.HasSuffix(file.Name(), suffix) {
+			return true
+		}
+	}
+	return false
+}
 
 // 获取所有的索引文件的路径
 func getIndexFilesPath(lsmPath string) []string {

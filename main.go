@@ -31,6 +31,7 @@ type Lsm struct {
 
 	transLogFile       *os.File
 	transLogStrictSync bool // transLog是否需要严格同步
+	closed             bool
 }
 
 func (l *Lsm) Set(key string, value string) {
@@ -62,6 +63,8 @@ func (l *Lsm) SyncMemTable() {
 
 // 关闭LSM，释放占用的资源
 func (l *Lsm) Close() {
+	l.closed = true
+
 	l.SyncMemTable() // 关闭前同步数据
 
 	// 获取日志文件的绝对路径
@@ -314,8 +317,150 @@ func restoreTransLogData(lsm *Lsm, transLogFilePath string) {
 }
 
 // 后台对数据文件进行合并
-func backgroundMerge(director string) {
+func (l *Lsm) backgroundMerge() {
+	ticker := time.NewTicker(time.Second * mergeCheckInterval)
+	for range ticker.C {
+		if l.closed {
+			return
+		}
+		// 存在不可用文件就不允许进行合并操作
+		if !isFileSuffixExist(l.path, unavailableFileSuffix) {
+			indexFilesPath := getIndexFilesPath(l.path)
+			if len(indexFilesPath) > maxSegmentFileSize {
+				var low1, low2 int64 = 0, 0
+				var file1, file2 string
+				for i, indexFile := range indexFilesPath {
+					segFilePath := strings.Replace(indexFile, indexFileSuffix, segmentFileSuffix, -1)
+					segFile, err := os.Open(segFilePath)
+					if err != nil {
+						log.Fatal(err)
+					}
+					fileInfo, err := segFile.Stat()
+					if err != nil {
+						log.Fatal(err)
+					}
+					size := fileInfo.Size()
+					if i%2 == 0 {
+						if low1 == 0 || size < low1 {
+							low1 = size
+							file1 = segFilePath
+						}
+					} else {
+						if low2 == 0 || size < low2 {
+							low2 = size
+							file2 = segFilePath
+						}
+					}
+					err = segFile.Close()
+					if err != nil {
+						log.Fatal(err)
+					}
+				}
 
+				segFile1, err := os.Open(file1)
+				if err != nil {
+					log.Fatal(err)
+				}
+				segFile2, err := os.Open(file2)
+				if err != nil {
+					log.Fatal(err)
+				}
+
+				var segFile *os.File
+				var indexFile *os.File
+				for {
+					segFilePath := path.Join(l.path, generateSegmentFileName(l.path))
+					if _, err := os.Stat(segFilePath); os.IsNotExist(err) {
+						segFile, err = os.Create(segFilePath)
+						if err != nil {
+							log.Fatal(err)
+						}
+						// create unavailable file
+						uaFilePath := strings.Replace(segFilePath, segmentFileSuffix, unavailableFileSuffix, -1)
+						uaFile, err := os.Create(uaFilePath)
+						if err != nil {
+							log.Fatal(err)
+						}
+						err = uaFile.Close()
+						if err != nil {
+							log.Fatal(err)
+						}
+						// 创建索引文件
+						indexFilePath := strings.Replace(segFilePath, segmentFileSuffix, indexFileSuffix, -1)
+						indexFile, err = os.Create(indexFilePath)
+						if err != nil {
+							log.Fatal(err)
+						}
+						break
+					}
+				}
+
+				info1, err := segFile1.Stat()
+				if err != nil {
+					log.Fatal(err)
+				}
+				segFile1Size := info1.Size()
+				info2, err := segFile2.Stat()
+				if err != nil {
+					log.Fatal(err)
+				}
+				segFile2Size := info2.Size()
+
+				var key1, key2 string
+				var data1, data2 Data
+				// 进行归并操作
+				for {
+					pos1, _ := segFile1.Seek(0, io.SeekCurrent)
+					pos2, _ := segFile2.Seek(0, io.SeekCurrent)
+					if pos1 >= segFile1Size && pos2 >= segFile2Size {
+						break
+					}
+					if pos1 < segFile1Size && key1 == "" {
+						key1, data1 = readKeyAndData(segFile1)
+					}
+					if pos2 < segFile2Size && key2 == "" {
+						key2, data2 = readKeyAndData(segFile2)
+					}
+					if key1 < key2 {
+						_, err = segFile.Write(encodeKeyAndData(key1, data1))
+						if err != nil {
+							log.Fatal(err)
+						}
+						key1 = "" // 置空
+					} else if key2 < key1 {
+						_, err = segFile.Write(encodeKeyAndData(key2, data2))
+						if err != nil {
+							log.Fatal(err)
+						}
+						key2 = ""
+					} else {
+						// todo 相等需要比较timestamp
+					}
+				}
+				err = segFile.Sync()
+				if err != nil {
+					log.Fatal(err)
+				}
+				err = segFile1.Close()
+				if err != nil {
+					log.Fatal(err)
+				}
+				err = segFile2.Close()
+				if err != nil {
+					log.Fatal(err)
+				}
+				err = segFile.Close()
+				if err != nil {
+					log.Fatal(err)
+				}
+				err = indexFile.Close()
+				if err != nil {
+					log.Fatal(err)
+				}
+			}
+			// todo 在使用文件名之前需要再次检测，防止竞争条件
+		}
+	}
 }
 
 // 新建一个LSM，数据文件的目录地址，是否开启严格的事务日志同步模式
@@ -332,6 +477,7 @@ func NewLsm(director string, transLogStrictSync bool) (*Lsm, error) {
 		path:               director,
 		memTable:           skiplist.NewStringMap(),
 		transLogStrictSync: transLogStrictSync,
+		closed:             false,
 	}
 	transLogFilePath := path.Join(director, transLog)
 	// 如果transLog文件存在则需要先从日志文件中恢复数据
@@ -353,6 +499,9 @@ func NewLsm(director string, transLogStrictSync bool) (*Lsm, error) {
 		go func() {
 			ticker := time.NewTicker(time.Second * transLogAsyncInterval)
 			for range ticker.C {
+				if lsm.closed {
+					return
+				}
 				// 每隔指定时间把日志数据落盘
 				err = lsm.transLogFile.Sync()
 				if err != nil {
@@ -367,6 +516,6 @@ func NewLsm(director string, transLogStrictSync bool) (*Lsm, error) {
 		}()
 	}
 
-	go backgroundMerge(lsm.path)
+	go lsm.backgroundMerge()
 	return lsm, nil
 }
