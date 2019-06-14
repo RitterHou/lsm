@@ -370,6 +370,7 @@ func (l *Lsm) backgroundMerge() {
 				var indexFile *os.File
 				for {
 					segFilePath := path.Join(l.path, generateSegmentFileName(l.path))
+					// 再次检测防止在此期间文件被创建
 					if _, err := os.Stat(segFilePath); os.IsNotExist(err) {
 						segFile, err = os.Create(segFilePath)
 						if err != nil {
@@ -433,8 +434,21 @@ func (l *Lsm) backgroundMerge() {
 							log.Fatal(err)
 						}
 						key2 = ""
-					} else {
-						// todo 相等需要比较timestamp
+					} else { // 相等则需要比较时间戳
+						if data1.timestamp >= data2.timestamp {
+							_, err = segFile.Write(encodeKeyAndData(key1, data1))
+							if err != nil {
+								log.Fatal(err)
+							}
+						} else {
+							_, err = segFile.Write(encodeKeyAndData(key2, data2))
+							if err != nil {
+								log.Fatal(err)
+							}
+						}
+						// 一个被正确的保存，另外一个被丢弃
+						key1 = ""
+						key2 = ""
 					}
 				}
 				err = segFile.Sync()
@@ -458,7 +472,6 @@ func (l *Lsm) backgroundMerge() {
 					log.Fatal(err)
 				}
 			}
-			// todo 在使用文件名之前需要再次检测，防止竞争条件
 		}
 	}
 }
