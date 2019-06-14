@@ -96,7 +96,8 @@ func TestQuery(t *testing.T) {
 			}
 			// t.Logf("%s: %s\n", key, value)
 			if i%1000 == 0 {
-				fmt.Printf("%4.2f%% %6ds %6d: %d %s: %s\n", float32(i)/float32(len(lines))*100, time.Now().Unix()-start, i, len(lines), key, value)
+				// fmt.Printf("%6.2f%% %6ds %6d: %d %s: %s\n", float32(i)/float32(len(lines))*100, time.Now().Unix()-start, i, len(lines), key, value)
+				fmt.Printf("%6.2f%% %3ds\n", float32(i)/float32(len(lines))*100, time.Now().Unix()-start)
 				start = time.Now().Unix()
 			}
 		}
