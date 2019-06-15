@@ -3,6 +3,5 @@ translog
 *.seg
 *.i
 *.ua
-lsm
 /vendor
 test.txt
