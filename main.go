@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/ryszard/goskiplist/skiplist"
 	"io"
 	"io/ioutil"
@@ -412,6 +413,7 @@ func (l *Lsm) backgroundMerge() {
 					log.Fatal(err)
 				}
 				segFile2Size := info2.Size()
+				fmt.Printf("%s & %s -> %s\n", segFile1.Name(), segFile2.Name(), segFile.Name())
 
 				i := uint64(0)
 				var key1, key2 string
@@ -422,7 +424,7 @@ func (l *Lsm) backgroundMerge() {
 
 					pos1, _ := segFile1.Seek(0, io.SeekCurrent)
 					pos2, _ := segFile2.Seek(0, io.SeekCurrent)
-					if pos1 >= segFile1Size && pos2 >= segFile2Size {
+					if pos1 == segFile1Size && pos2 == segFile2Size {
 						break
 					}
 					if pos1 < segFile1Size && key1 == "" {
@@ -431,7 +433,22 @@ func (l *Lsm) backgroundMerge() {
 					if pos2 < segFile2Size && key2 == "" {
 						key2, data2 = readKeyAndData(segFile2)
 					}
-					if key1 < key2 {
+
+					if key1 == "" {
+						_, err = segFile.Write(encodeKeyAndData(key2, data2))
+						if err != nil {
+							log.Fatal(err)
+						}
+						key = key2
+						key2 = ""
+					} else if key2 == "" {
+						_, err = segFile.Write(encodeKeyAndData(key1, data1))
+						if err != nil {
+							log.Fatal(err)
+						}
+						key = key1
+						key1 = "" // 置空
+					} else if key1 < key2 {
 						_, err = segFile.Write(encodeKeyAndData(key1, data1))
 						if err != nil {
 							log.Fatal(err)
@@ -467,7 +484,7 @@ func (l *Lsm) backgroundMerge() {
 					pos1, _ = segFile1.Seek(0, io.SeekCurrent)
 					pos2, _ = segFile2.Seek(0, io.SeekCurrent)
 					// 写索引文件
-					if i%indexOffset == 0 || (pos1 >= segFile1Size && pos2 >= segFile2Size) {
+					if i%indexOffset == 0 || (pos1 == segFile1Size && pos2 == segFile2Size) {
 						_, err = indexFile.Write(addBufHead([]byte(key)))
 						if err != nil {
 							log.Fatal(err)
@@ -483,6 +500,7 @@ func (l *Lsm) backgroundMerge() {
 					}
 					i += 1
 				}
+				fmt.Println("归并结束")
 				err = segFile1.Close()
 				if err != nil {
 					log.Fatal(err)
