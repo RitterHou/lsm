@@ -2,6 +2,7 @@ package lsm
 
 import (
 	"encoding/binary"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -41,8 +42,8 @@ func isFileSuffixExist(director string, suffix string) bool {
 }
 
 // 获取所有的索引文件的路径
-func getIndexFilesPath(lsmPath string) []string {
-	files, err := ioutil.ReadDir(lsmPath)
+func getIndexFilesPath(director string) []string {
+	files, err := ioutil.ReadDir(director)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -51,7 +52,7 @@ func getIndexFilesPath(lsmPath string) []string {
 	for _, file := range files {
 		name := file.Name()
 		if file.Mode().IsRegular() && strings.HasSuffix(name, indexFileSuffix) {
-			paths = append(paths, path.Join(lsmPath, name))
+			paths = append(paths, path.Join(director, name))
 		}
 	}
 	return paths
@@ -124,6 +125,7 @@ func addBufHead(buf []byte) []byte {
 	return body
 }
 
+// 把key和data进行编码
 func encodeKeyAndData(key string, data Data) []byte {
 	buf := addBufHead([]byte(key))
 	buf = append(buf, addBufHead([]byte(data.value))...)
@@ -131,6 +133,7 @@ func encodeKeyAndData(key string, data Data) []byte {
 	return buf
 }
 
+// 把字节数组解码为key的data
 func decodeKeyAndData(buf []byte) (string, Data, uint32) {
 	keyBuf, keyOffset := parseBuf(buf)
 	buf = buf[keyOffset:]
@@ -158,6 +161,7 @@ func parseBuf(buf []byte) ([]byte, uint32) {
 	}
 }
 
+// 从文件中解码出一个字节数组
 func readBuf(file *os.File) []byte {
 	headBuf := make([]byte, 1)
 	_, err := file.Read(headBuf)
@@ -188,6 +192,7 @@ func readBuf(file *os.File) []byte {
 	}
 }
 
+// 从文件中读取一组key和data
 func readKeyAndData(file *os.File) (string, Data) {
 	key := readBuf(file)
 	value := readBuf(file)
@@ -199,4 +204,35 @@ func readKeyAndData(file *os.File) (string, Data) {
 	}
 	timestamp := binary.LittleEndian.Uint64(timestampBuf)
 	return string(key), Data{value: string(value), timestamp: timestamp}
+}
+
+// 获取指定文件的大小
+func getFileSize(file *os.File) int64 {
+	fileInfo, err := file.Stat()
+	if err != nil {
+		log.Fatal(err)
+	}
+	return fileInfo.Size()
+}
+
+// 获取文件的当前读写位置
+func getCurrentPosition(file *os.File) int64 {
+	// 从当前偏移改变0，还是当前偏移
+	position, err := file.Seek(0, io.SeekCurrent)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return position
+}
+
+// 设置文件的当前读写位置
+func setCurrentPosition(file *os.File, position uint32) {
+	_, err := file.Seek(int64(position), 0)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func getTwoSmallFiles() {
+
 }
