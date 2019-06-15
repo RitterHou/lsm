@@ -233,6 +233,176 @@ func setCurrentPosition(file *os.File, position uint32) {
 	}
 }
 
-func getTwoSmallFiles() {
+// 找出当前目录最小的两个段文件
+func getTwoSmallFiles(indexFilesPath []string) (string, string) {
+	var low1, low2 int64 = 0, 0
+	var file1, file2 string
+	for i, indexFile := range indexFilesPath {
+		segFilePath := strings.Replace(indexFile, indexFileSuffix, segmentFileSuffix, -1)
+		segFile, err := os.Open(segFilePath)
+		if err != nil {
+			log.Fatal(err)
+		}
+		size := getFileSize(segFile)
+		if i%2 == 0 {
+			if low1 == 0 || size < low1 {
+				low1 = size
+				file1 = segFilePath
+			}
+		} else {
+			if low2 == 0 || size < low2 {
+				low2 = size
+				file2 = segFilePath
+			}
+		}
+		err = segFile.Close()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+	return file1, file2
+}
 
+// 为归并操作创建新的目标文件
+func createNewSegFile(director string) (*os.File, *os.File) {
+	var segFile *os.File
+	var indexFile *os.File
+	for {
+		segFilePath := path.Join(director, generateSegmentFileName(director))
+		// 再次检测防止在此期间文件被创建
+		if _, err := os.Stat(segFilePath); os.IsNotExist(err) {
+			// 创建段文件
+			segFile, err = os.Create(segFilePath)
+			if err != nil {
+				log.Fatal(err)
+			}
+			// 创建ua文件
+			uaFilePath := strings.Replace(segFilePath, segmentFileSuffix, unavailableFileSuffix, -1)
+			uaFile, err := os.Create(uaFilePath)
+			if err != nil {
+				log.Fatal(err)
+			}
+			err = uaFile.Close()
+			if err != nil {
+				log.Fatal(err)
+			}
+			// 创建索引文件
+			indexFilePath := strings.Replace(segFilePath, segmentFileSuffix, indexFileSuffix, -1)
+			indexFile, err = os.Create(indexFilePath)
+			if err != nil {
+				log.Fatal(err)
+			}
+			break
+		}
+	}
+	return segFile, indexFile
+}
+
+// 进行归并操作
+func merge(source1, source2, target, indexFile *os.File) {
+	var err error
+	segFile1Size := getFileSize(source1)
+	segFile2Size := getFileSize(source2)
+
+	i := uint64(0)
+	var key1, key2 string
+	var data1, data2 Data
+	// 进行归并操作
+	for {
+		var key string // 段文件当前使用的key
+
+		pos1, _ := source1.Seek(0, io.SeekCurrent)
+		pos2, _ := source2.Seek(0, io.SeekCurrent)
+		if pos1 == segFile1Size && pos2 == segFile2Size {
+			break
+		}
+		if pos1 < segFile1Size && key1 == "" {
+			key1, data1 = readKeyAndData(source1)
+		}
+		if pos2 < segFile2Size && key2 == "" {
+			key2, data2 = readKeyAndData(source2)
+		}
+
+		if key1 == "" {
+			_, err = target.Write(encodeKeyAndData(key2, data2))
+			if err != nil {
+				log.Fatal(err)
+			}
+			key = key2
+			key2 = ""
+		} else if key2 == "" {
+			_, err = target.Write(encodeKeyAndData(key1, data1))
+			if err != nil {
+				log.Fatal(err)
+			}
+			key = key1
+			key1 = "" // 置空表示该值已经被使用
+		} else if key1 < key2 {
+			_, err = target.Write(encodeKeyAndData(key1, data1))
+			if err != nil {
+				log.Fatal(err)
+			}
+			key = key1
+			key1 = ""
+		} else if key2 < key1 {
+			_, err = target.Write(encodeKeyAndData(key2, data2))
+			if err != nil {
+				log.Fatal(err)
+			}
+			key = key2
+			key2 = ""
+		} else { // 相等则需要比较时间戳
+			if data1.timestamp >= data2.timestamp {
+				_, err = target.Write(encodeKeyAndData(key1, data1))
+				if err != nil {
+					log.Fatal(err)
+				}
+				key = key1
+			} else {
+				_, err = target.Write(encodeKeyAndData(key2, data2))
+				if err != nil {
+					log.Fatal(err)
+				}
+				key = key2
+			}
+			// 一个被正确的保存，另外一个被丢弃
+			key1 = ""
+			key2 = ""
+		}
+
+		pos1, _ = source1.Seek(0, io.SeekCurrent)
+		pos2, _ = source2.Seek(0, io.SeekCurrent)
+		// 写索引文件
+		if i%indexOffset == 0 || (pos1 == segFile1Size && pos2 == segFile2Size) {
+			_, err = indexFile.Write(addBufHead([]byte(key)))
+			if err != nil {
+				log.Fatal(err)
+			}
+			size, err := target.Seek(0, io.SeekCurrent)
+			if err != nil {
+				log.Fatal(err)
+			}
+			_, err = indexFile.Write(uint32ToBytes(uint32(size)))
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+		i += 1
+	}
+}
+
+// 关闭文件
+func closeFile(file *os.File) {
+	err := file.Close()
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+// 删除文件
+func removeFile(file string) {
+	err := os.Remove(file)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
