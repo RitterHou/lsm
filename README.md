@@ -1,6 +1,6 @@
 # lsm
 
-## Theory
+### Theory
 
 1. 在内存中用SkipList进行存储（内存表：memtable）
 2. 内存中的数据到达一定大小后有序的写到磁盘上（Sorted String Table 简称SSTable）
@@ -10,7 +10,7 @@
 
 参考：<https://github.com/Vonng/ddia/blob/master/ch3.md#sstables%E5%92%8Clsm%E6%A0%91>
 
-## Contribute
+### Contribute
 
 下载依赖
 
