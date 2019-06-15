@@ -1,6 +1,7 @@
 package lsm
 
 import (
+	"errors"
 	"fmt"
 	"github.com/ryszard/goskiplist/skiplist"
 	"io"
@@ -76,6 +77,12 @@ func (l *Lsm) Close() {
 	}
 	// 删除日志文件
 	err = os.Remove(l.transLogFile.Name())
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// 删除锁文件
+	err = os.Remove(path.Join(l.path, writeLockFile))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -582,6 +589,19 @@ func NewLsm(director string, transLogStrictSync bool) (*Lsm, error) {
 			log.Fatal(err)
 		}
 		director = dir
+	}
+
+	lockFilePath := path.Join(director, writeLockFile)
+	if _, err := os.Stat(lockFilePath); !os.IsNotExist(err) {
+		return nil, errors.New("Director " + director + " has been used for another LSM Tree")
+	}
+	lockFile, err := os.Create(lockFilePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = lockFile.Close()
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	lsm := &Lsm{

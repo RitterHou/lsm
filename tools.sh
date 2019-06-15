@@ -24,6 +24,12 @@ case $1 in
     then
 	    rm translog
     fi
+
+    if [[ -e "write.lock" ]]
+    then
+	    rm write.lock
+    fi
+
     ;;
 *)
     echo 'Unknown command'

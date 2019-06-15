@@ -22,6 +22,7 @@ const (
 	transLog              = "translog"      // transLog文件的名称，即事务日志(transaction log)
 	transLogAsyncInterval = 1               // transLog异步的落盘时间间隔（秒）
 	waitOldSegFileDelTime = 5               // 旧的段文件被打上废弃标签后等待一段时间再删除该文件（秒）
+	writeLockFile         = "write.lock"    // 写LSM的文件锁
 )
 
 // 在指定目录中是否存在特定的后缀名文件

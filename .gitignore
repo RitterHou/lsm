@@ -3,5 +3,6 @@ translog
 *.seg
 *.i
 *.ua
+write.lock
 /vendor
 test.txt
