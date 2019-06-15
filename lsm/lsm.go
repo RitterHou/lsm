@@ -350,15 +350,15 @@ func (l *Lsm) backgroundMerge() {
 			closeFile(indexFile)
 
 			// 移除新创建文件的不可用标志，表示新创建的文件已经可以被读取
-			removeFile(strings.Replace(path.Join(l.path, segFile.Name()), segmentFileSuffix, unavailableFileSuffix, -1))
+			removeFile(strings.Replace(segFile.Name(), segmentFileSuffix, unavailableFileSuffix, -1))
 			// 给旧的文件创建不可读标志
-			uaFile1Path := strings.Replace(path.Join(l.path, segFile1.Name()), segmentFileSuffix, unavailableFileSuffix, -1)
+			uaFile1Path := strings.Replace(segFile1.Name(), segmentFileSuffix, unavailableFileSuffix, -1)
 			uaFile1, err := os.Create(uaFile1Path)
 			if err != nil {
 				log.Fatal(err)
 			}
 			closeFile(uaFile1)
-			uaFile2Path := strings.Replace(path.Join(l.path, segFile2.Name()), segmentFileSuffix, unavailableFileSuffix, -1)
+			uaFile2Path := strings.Replace(segFile2.Name(), segmentFileSuffix, unavailableFileSuffix, -1)
 			uaFile2, err := os.Create(uaFile2Path)
 			if err != nil {
 				log.Fatal(err)
@@ -367,11 +367,11 @@ func (l *Lsm) backgroundMerge() {
 			// 在旧的段文件被打上废弃标签后，为了防止当前还有进程在读取此段文件，需要等待一段时间后再删除该文件
 			time.Sleep(time.Second * waitOldSegFileDelTime)
 			// 删除段文件，索引文件，不可用文件
-			removeFile(path.Join(l.path, segFile1.Name()))
-			removeFile(strings.Replace(path.Join(l.path, segFile1.Name()), segmentFileSuffix, indexFileSuffix, -1))
+			removeFile(segFile1.Name())
+			removeFile(strings.Replace(segFile1.Name(), segmentFileSuffix, indexFileSuffix, -1))
 			removeFile(uaFile1Path)
-			removeFile(path.Join(l.path, segFile2.Name()))
-			removeFile(strings.Replace(path.Join(l.path, segFile2.Name()), segmentFileSuffix, indexFileSuffix, -1))
+			removeFile(segFile2.Name())
+			removeFile(strings.Replace(segFile2.Name(), segmentFileSuffix, indexFileSuffix, -1))
 			removeFile(uaFile2Path)
 		}
 	}
