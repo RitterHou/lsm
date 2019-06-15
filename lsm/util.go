@@ -316,12 +316,14 @@ func merge(source1, source2, target, indexFile *os.File) {
 		if pos1 == segFile1Size && pos2 == segFile2Size {
 			break
 		}
+
 		if pos1 < segFile1Size && key1 == "" {
 			key1, data1 = readKeyAndData(source1)
 		}
 		if pos2 < segFile2Size && key2 == "" {
 			key2, data2 = readKeyAndData(source2)
 		}
+		currentOffset := getCurrentPosition(target)
 
 		if key1 == "" {
 			_, err = target.Write(encodeKeyAndData(key2, data2))
@@ -378,11 +380,7 @@ func merge(source1, source2, target, indexFile *os.File) {
 			if err != nil {
 				log.Fatal(err)
 			}
-			size, err := target.Seek(0, io.SeekCurrent)
-			if err != nil {
-				log.Fatal(err)
-			}
-			_, err = indexFile.Write(uint32ToBytes(uint32(size)))
+			_, err = indexFile.Write(uint32ToBytes(uint32(currentOffset)))
 			if err != nil {
 				log.Fatal(err)
 			}
