@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"path"
-	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -199,13 +198,4 @@ func readKeyAndData(file *os.File) (string, Data) {
 	}
 	timestamp := binary.LittleEndian.Uint64(timestampBuf)
 	return string(key), Data{value: string(value), timestamp: timestamp}
-}
-
-// 获取指定文件的绝对路径
-func GetFilePath(file *os.File) string {
-	absPath, err := filepath.Abs(filepath.Dir(file.Name()))
-	if err != nil {
-		log.Fatal(err)
-	}
-	return path.Join(absPath, file.Name())
 }

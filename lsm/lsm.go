@@ -68,8 +68,6 @@ func (l *Lsm) Close() {
 
 	l.SyncMemTable() // 关闭前同步数据
 
-	// 获取日志文件的绝对路径
-	transLogFilePath := GetFilePath(l.transLogFile)
 	var err error
 	// 关闭日志文件
 	err = l.transLogFile.Close()
@@ -77,7 +75,7 @@ func (l *Lsm) Close() {
 		log.Fatal(err)
 	}
 	// 删除日志文件
-	err = os.Remove(transLogFilePath)
+	err = os.Remove(l.transLogFile.Name())
 	if err != nil {
 		log.Fatal(err)
 	}

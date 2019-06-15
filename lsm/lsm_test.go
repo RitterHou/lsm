@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+const (
+	director = "../"
+	testFile = "../test.txt"
+)
+
 // 生成随机字符串
 func randomString(n int) string {
 	rand.Seed(time.Now().UnixNano())
@@ -26,7 +31,7 @@ func randomInt(from, to int) int {
 }
 
 func TestEasySave(t *testing.T) {
-	lsm, err := NewLsm("./", false)
+	lsm, err := NewLsm(director, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +50,7 @@ func TestEasySave(t *testing.T) {
 }
 
 func TestEasyQuery(t *testing.T) {
-	lsm, err := NewLsm("./", false)
+	lsm, err := NewLsm(director, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +73,7 @@ func TestEasyQuery(t *testing.T) {
 func TestSave(t *testing.T) {
 	start := time.Now().Unix()
 
-	lsm, err := NewLsm("./", false)
+	lsm, err := NewLsm(director, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +85,7 @@ func TestSave(t *testing.T) {
 	lsm.Set("name", "Json")
 	t.Log(lsm.Get("name"))
 
-	data, err := ioutil.ReadFile("./test.txt")
+	data, err := ioutil.ReadFile(testFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +102,7 @@ func TestSave(t *testing.T) {
 }
 
 func TestQuery(t *testing.T) {
-	lsm, err := NewLsm("./", false)
+	lsm, err := NewLsm(director, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +120,7 @@ func TestQuery(t *testing.T) {
 	}
 	t.Log(lsm.Get("g4829571_20212"))
 
-	data, err := ioutil.ReadFile("./test.txt")
+	data, err := ioutil.ReadFile(testFile)
 	if err != nil {
 		t.Fatal(err)
 	}
