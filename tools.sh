@@ -14,6 +14,12 @@ case $1 in
         rm *.i
     fi
 
+    uaArray=(`find ./ -maxdepth 1 -name "*.ua"`)
+    if [[ ${#uaArray[@]} -gt 0 ]]
+    then
+        rm *.ua
+    fi
+
     if [[ -e "translog" ]]
     then
 	    rm translog
