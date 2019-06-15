@@ -30,6 +30,13 @@ func randomInt(from, to int) int {
 	return rand.Intn(to-from) + from
 }
 
+func TestReader(t *testing.T) {
+	lsmReader := NewLsmReader(director)
+	t.Log(lsmReader.Get("name"))
+	t.Log(lsmReader.Get("hobby"))
+	t.Log(lsmReader.Get("age"))
+}
+
 func TestEasySave(t *testing.T) {
 	lsm, err := NewLsm(director, false)
 	if err != nil {
