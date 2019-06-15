@@ -22,6 +22,7 @@ const (
 	maxSegmentFileSize    = 5               // 当段文件数量超过这个限制的时候就会触发merge
 	transLog              = "translog"      // transLog文件的名称，即事务日志(transaction log)
 	transLogAsyncInterval = 1               // transLog异步的落盘时间间隔（秒）
+	waitOldSegFileDelTime = 5               // 旧的段文件被打上废弃标签后等待一段时间再删除该文件（秒）
 )
 
 // 在指定目录中是否存在特定的后缀名文件

@@ -177,6 +177,10 @@ func (l *Lsm) Get(key string) (string, bool) {
 	indexFilesPath := getIndexFilesPath(l.path)
 	for _, indexFilePath := range indexFilesPath {
 		segFilePath := strings.Replace(indexFilePath, indexFileSuffix, segmentFileSuffix, -1)
+		if _, err := os.Stat(strings.Replace(indexFilePath, indexFileSuffix, unavailableFileSuffix, -1)); !os.IsNotExist(err) {
+			// 如果当前段文件存在对应的ua文件，在不读取此文件
+			continue
+		}
 
 		var err error
 		indexData, err := ioutil.ReadFile(indexFilePath)
@@ -327,6 +331,7 @@ func (l *Lsm) backgroundMerge() {
 		if !isFileSuffixExist(l.path, unavailableFileSuffix) {
 			indexFilesPath := getIndexFilesPath(l.path)
 			if len(indexFilesPath) > maxSegmentFileSize {
+				// 找出最小的两个段文件，并在随后对其进行merge
 				var low1, low2 int64 = 0, 0
 				var file1, file2 string
 				for i, indexFile := range indexFilesPath {
@@ -376,7 +381,7 @@ func (l *Lsm) backgroundMerge() {
 						if err != nil {
 							log.Fatal(err)
 						}
-						// create unavailable file
+						// 创建ua文件
 						uaFilePath := strings.Replace(segFilePath, segmentFileSuffix, unavailableFileSuffix, -1)
 						uaFile, err := os.Create(uaFilePath)
 						if err != nil {
@@ -396,6 +401,7 @@ func (l *Lsm) backgroundMerge() {
 					}
 				}
 
+				// 获取段文件的尺寸信息
 				info1, err := segFile1.Stat()
 				if err != nil {
 					log.Fatal(err)
@@ -407,10 +413,13 @@ func (l *Lsm) backgroundMerge() {
 				}
 				segFile2Size := info2.Size()
 
+				i := uint64(0)
 				var key1, key2 string
 				var data1, data2 Data
 				// 进行归并操作
 				for {
+					var key string // 段文件当前使用的key
+
 					pos1, _ := segFile1.Seek(0, io.SeekCurrent)
 					pos2, _ := segFile2.Seek(0, io.SeekCurrent)
 					if pos1 >= segFile1Size && pos2 >= segFile2Size {
@@ -427,12 +436,14 @@ func (l *Lsm) backgroundMerge() {
 						if err != nil {
 							log.Fatal(err)
 						}
+						key = key1
 						key1 = "" // 置空
 					} else if key2 < key1 {
 						_, err = segFile.Write(encodeKeyAndData(key2, data2))
 						if err != nil {
 							log.Fatal(err)
 						}
+						key = key2
 						key2 = ""
 					} else { // 相等则需要比较时间戳
 						if data1.timestamp >= data2.timestamp {
@@ -440,20 +451,37 @@ func (l *Lsm) backgroundMerge() {
 							if err != nil {
 								log.Fatal(err)
 							}
+							key = key1
 						} else {
 							_, err = segFile.Write(encodeKeyAndData(key2, data2))
 							if err != nil {
 								log.Fatal(err)
 							}
+							key = key2
 						}
 						// 一个被正确的保存，另外一个被丢弃
 						key1 = ""
 						key2 = ""
 					}
-				}
-				err = segFile.Sync()
-				if err != nil {
-					log.Fatal(err)
+
+					pos1, _ = segFile1.Seek(0, io.SeekCurrent)
+					pos2, _ = segFile2.Seek(0, io.SeekCurrent)
+					// 写索引文件
+					if i%indexOffset == 0 || (pos1 >= segFile1Size && pos2 >= segFile2Size) {
+						_, err = indexFile.Write(addBufHead([]byte(key)))
+						if err != nil {
+							log.Fatal(err)
+						}
+						size, err := segFile.Seek(0, io.SeekCurrent)
+						if err != nil {
+							log.Fatal(err)
+						}
+						_, err = indexFile.Write(uint32ToBytes(uint32(size)))
+						if err != nil {
+							log.Fatal(err)
+						}
+					}
+					i += 1
 				}
 				err = segFile1.Close()
 				if err != nil {
@@ -468,6 +496,60 @@ func (l *Lsm) backgroundMerge() {
 					log.Fatal(err)
 				}
 				err = indexFile.Close()
+				if err != nil {
+					log.Fatal(err)
+				}
+				// 移除新创建文件的不可用标志，表示新创建的文件已经可以被读取
+				err = os.Remove(strings.Replace(path.Join(l.path, segFile.Name()), segmentFileSuffix, unavailableFileSuffix, -1))
+				if err != nil {
+					log.Fatal(err)
+				}
+				// 给旧的文件创建不可读标志
+				uaFile1Path := strings.Replace(path.Join(l.path, segFile1.Name()), segmentFileSuffix, unavailableFileSuffix, -1)
+				uaFile1, err := os.Create(uaFile1Path)
+				if err != nil {
+					log.Fatal(err)
+				}
+				err = uaFile1.Close()
+				if err != nil {
+					log.Fatal(err)
+				}
+				uaFile2Path := strings.Replace(path.Join(l.path, segFile2.Name()), segmentFileSuffix, unavailableFileSuffix, -1)
+				uaFile2, err := os.Create(uaFile2Path)
+				if err != nil {
+					log.Fatal(err)
+				}
+				err = uaFile2.Close()
+				if err != nil {
+					log.Fatal(err)
+				}
+				// 在旧的段文件被打上废弃标签后，为了防止当前还有进程在读取此段文件，需要等待一段时间后再删除该文件
+				time.Sleep(time.Second * waitOldSegFileDelTime)
+				// 删除段文件
+				err = os.Remove(path.Join(l.path, segFile1.Name()))
+				if err != nil {
+					log.Fatal(err)
+				}
+				// 删除索引文件
+				err = os.Remove(strings.Replace(path.Join(l.path, segFile1.Name()), segmentFileSuffix, indexFileSuffix, -1))
+				if err != nil {
+					log.Fatal(err)
+				}
+				// 删除不可用文件
+				err = os.Remove(uaFile1Path)
+				if err != nil {
+					log.Fatal(err)
+				}
+
+				err = os.Remove(path.Join(l.path, segFile2.Name()))
+				if err != nil {
+					log.Fatal(err)
+				}
+				err = os.Remove(strings.Replace(path.Join(l.path, segFile2.Name()), segmentFileSuffix, indexFileSuffix, -1))
+				if err != nil {
+					log.Fatal(err)
+				}
+				err = os.Remove(uaFile2Path)
 				if err != nil {
 					log.Fatal(err)
 				}
