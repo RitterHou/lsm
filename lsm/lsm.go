@@ -341,13 +341,12 @@ func (l *Lsm) backgroundMerge() {
 				log.Fatal(err)
 			}
 
-			segFile, indexFile := createNewSegFile(l.path)
-			merge(segFile1, segFile2, segFile, indexFile)
+			segFile := createNewSegFile(l.path)
+			merge(segFile1, segFile2, segFile)
 
 			closeFile(segFile1)
 			closeFile(segFile2)
 			closeFile(segFile)
-			closeFile(indexFile)
 
 			// 移除新创建文件的不可用标志，表示新创建的文件已经可以被读取
 			removeFile(strings.Replace(segFile.Name(), segmentFileSuffix, unavailableFileSuffix, -1))

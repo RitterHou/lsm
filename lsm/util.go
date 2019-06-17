@@ -9,6 +9,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -264,9 +265,8 @@ func getTwoSmallFiles(indexFilesPath []string) (string, string) {
 }
 
 // 为归并操作创建新的目标文件
-func createNewSegFile(director string) (*os.File, *os.File) {
+func createNewSegFile(director string) *os.File {
 	var segFile *os.File
-	var indexFile *os.File
 	for {
 		segFilePath := path.Join(director, generateSegmentFileName(director))
 		// 再次检测防止在此期间文件被创建
@@ -286,21 +286,24 @@ func createNewSegFile(director string) (*os.File, *os.File) {
 			if err != nil {
 				log.Fatal(err)
 			}
-			// 创建索引文件
-			indexFilePath := strings.Replace(segFilePath, segmentFileSuffix, indexFileSuffix, -1)
-			indexFile, err = os.Create(indexFilePath)
-			if err != nil {
-				log.Fatal(err)
-			}
 			break
 		}
 	}
-	return segFile, indexFile
+	return segFile
 }
 
 // 进行归并操作
-func merge(source1, source2, target, indexFile *os.File) {
+func merge(source1, source2, target *os.File) {
+	start := time.Now().UnixNano()
 	var err error
+
+	// 创建索引文件
+	indexFilePath := strings.Replace(target.Name(), segmentFileSuffix, indexFileSuffix, -1)
+	indexFile, err := os.Create(indexFilePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	segFile1Size := getFileSize(source1)
 	segFile2Size := getFileSize(source2)
 
@@ -387,6 +390,9 @@ func merge(source1, source2, target, indexFile *os.File) {
 		}
 		i += 1
 	}
+	closeFile(indexFile)
+	log.Printf("merge: %s & %s -> %s, cost %dns\n",
+		source1.Name(), source2.Name(), target.Name(), time.Now().UnixNano()-start)
 }
 
 // 关闭文件
